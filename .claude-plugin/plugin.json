@@ -1,0 +1,6 @@
+{
+  "name": "context-bar",
+  "version": "0.1.0",
+  "description": "A horizontal context-window bar above the prompt: fill by category, tokens, room until auto-compact, model",
+  "types": "./types/index.d.ts"
+}
