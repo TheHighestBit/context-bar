@@ -27,11 +27,17 @@ const POLL_MS = 60_000
 const BACKOFF_MS = 5 * 60_000
 const AFTER_TURN_GAP_MS = 20_000
 const STALE_MS = 3 * 60_000
+// After a compaction or /clear the new conversation lands once the engine's
+// own steps finish: read the breakdown again a little later, then once more.
+const SETTLE_MS = [300, 1_500, 5_000] as const
 
 // The poll's own bookkeeping: a reload starts it over, which only asks sooner.
 let nextFetchAt = 0
 let lastFetchAt = 0
 let fetchingSince = 0
+// True from a compaction or /clear until the next main-thread response: the
+// status line's fill still describes the conversation from before it.
+let isLiveStale = false
 
 async function fetchPlan($: EngineInterface): Promise<void> {
   const now = await $.clock.now()
@@ -123,6 +129,7 @@ export const register: Register = on => {
     if (e.agentId !== undefined) {
       return result
     }
+    isLiveStale = false
     const sent = e.effort === undefined ? null : String(e.effort)
     if ((await read($, effort)) !== sent) {
       await update($, effort, () => sent)
@@ -149,10 +156,30 @@ export const register: Register = on => {
     return result
   })
 
+  on('session.compact', async ($, e, next) => {
+    const result = await next(e)
+    if (e.agentId === undefined && e.trigger !== 'precompute' && result.messages !== undefined) {
+      isLiveStale = true
+      refreshSoon($)
+    }
+
+    return result
+  })
+
+  on('classic.PostCompact', async ($, e, next) => {
+    const result = await next(e)
+    isLiveStale = true
+    refreshSoon($)
+
+    return result
+  })
+
   on('classic.SessionStart', async ($, e, next) => {
     const result = await next(e)
     if (e.source === 'clear' || e.source === 'compact') {
+      isLiveStale = true
       await refresh($)
+      refreshSoon($)
     }
 
     return result
@@ -310,6 +337,12 @@ async function refresh($: EngineInterface): Promise<void> {
  * The cheap figures between breakdowns: the session's cost, background
  * subagents' spend included, and the main window's fill.
  */
+function refreshSoon($: EngineInterface): void {
+  for (const ms of SETTLE_MS) {
+    $.clock.after(ms, () => void refresh($).catch(() => undefined))
+  }
+}
+
 async function syncLive($: EngineInterface): Promise<void> {
   const usage = await $.session.usage()
   if (usage.cost !== undefined) {
@@ -317,7 +350,7 @@ async function syncLive($: EngineInterface): Promise<void> {
   }
   const live = usage.context.tokens
   const snap = await read($, snapshot)
-  if (live !== undefined && snap !== null && snap.tokens !== live) {
+  if (live !== undefined && !isLiveStale && snap !== null && snap.tokens !== live) {
     await update($, snapshot, s => (s === null ? s : withTokens(s, live)))
   }
 }

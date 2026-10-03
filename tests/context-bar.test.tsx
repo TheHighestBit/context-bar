@@ -1,6 +1,6 @@
 import { expect, mock, test } from 'claude-code/testing'
 import type { Engine, MockClock } from 'claude-code/testing'
-import type { On, SessionAuthorization, SessionUsage } from 'claude-code'
+import type { On, SessionAuthorization, SessionMessage, SessionUsage } from 'claude-code'
 
 const SURFACES = ['terminal', 'desktop'] as const
 const NOW = Date.parse('2026-10-03T12:00:00Z')
@@ -44,6 +44,30 @@ const USAGE: SessionUsage = {
   rateLimits: [],
   cost: { usd: 4.2134 },
 }
+
+// After a compaction: the breakdown is small again while the status line's
+// fill, from the last response before it, still reads the old size.
+const COMPACTED: SessionUsage = {
+  ...USAGE,
+  context: {
+    ...USAGE.context,
+    breakdown: {
+      ...USAGE.context.breakdown!,
+      categories: [
+        { name: 'System prompt', tokens: 3_000, color: 'promptBorder', isDeferred: false, kind: 'used' },
+        { name: 'System tools', tokens: 15_000, color: 'inactive', isDeferred: false, kind: 'used' },
+        { name: 'Messages', tokens: 4_000, color: 'permission', isDeferred: false, kind: 'used' },
+        { name: 'Free space', tokens: 145_000, color: 'promptBorder', isDeferred: false, kind: 'free' },
+        { name: 'Autocompact buffer', tokens: 33_000, color: 'inactive', isDeferred: false, kind: 'buffer' },
+      ],
+      totalTokens: 22_000,
+      percentage: 11,
+      apiUsage: null,
+    },
+  },
+}
+
+const SUMMARY: SessionMessage = { role: 'user', text: 'Summary of the conversation so far.', toolUses: [] }
 
 // The usage endpoint's reply, in the shape the CLI's own /usage parses.
 const SESSION_ROW = {
@@ -89,6 +113,7 @@ type Reply = { status: number; body: unknown }
 
 type World = {
   clock: MockClock
+  usage: SessionUsage
   fetches: { url: string; auth: string | undefined }[]
 }
 
@@ -100,13 +125,15 @@ function world(
     replies?: Reply[]
   } = {},
 ): World {
-  const w: World = { clock: mock.clock(on, { now: NOW }), fetches: [] }
+  const w: World = { clock: mock.clock(on, { now: NOW }), usage: USAGE, fetches: [] }
   const queue = [...replies]
   mock.store(on)
   on('session.start', (_$, e) => ({ cwd: e.cwd }))
   on('command.register', (_$, e) => ({ value: { command: e.name } }))
   on('settings.read', () => ({ value: { effortLevel: 'high' } }))
-  on('session.usage', () => ({ value: USAGE }))
+  on('session.usage', () => ({ value: w.usage }))
+  on('session.compact', () => ({ messages: [SUMMARY], tokensBefore: 52_000, tokensAfter: 4_000 }))
+  on('classic.PostCompact', () => ({}))
   on('session.authorize', () => ({ value: auth }))
   on('http.fetch', (_$, e) => {
     w.fetches.push({ url: e.url, auth: e.init?.auth })
@@ -299,6 +326,38 @@ test('the legend sits under the context row, above the usage row', async ($, on)
     expect(at(/System tools 15k/)).toBeLessThan(at(/^Session$/))
     await ui.unmount()
   }
+})
+
+test('a compaction redraws the bar without waiting for the next message', async ($, on) => {
+  const w = world(on)
+  await start($, w)
+  const ui = await $.ui.mount({ plugin: 'context-bar', surface: 'terminal', ...BAND })
+  expect(await ui.find({ type: 'Text', text: /26%/ })).toBeDefined()
+
+  w.usage = COMPACTED
+  await $.session.compact({ trigger: 'manual', messages: [SUMMARY] })
+  await w.clock.advance(300)
+  expect((await ui.find({ type: 'Text', text: /11%/ }))?.text).toContain('~22k/200k')
+
+  // The 15-second sync must not put the pre-compaction fill back.
+  await w.clock.advance(15_000)
+  expect(await ui.find({ type: 'Text', text: /11%/ })).toBeDefined()
+
+  // The next response is the live fill again.
+  await step($, { turnId: 't2', index: 0, model: 'claude-opus-5-5', messageCount: 3 })
+  expect(await ui.find({ type: 'Text', text: /50%/ })).toBeDefined()
+  await ui.unmount()
+})
+
+test('an auto-compaction seen only as PostCompact redraws the bar too', async ($, on) => {
+  const w = world(on)
+  await start($, w)
+  const ui = await $.ui.mount({ plugin: 'context-bar', surface: 'terminal', ...BAND })
+  w.usage = COMPACTED
+  await $.classic.PostCompact({ trigger: 'auto', compact_summary: 'summary' })
+  await w.clock.advance(300)
+  expect(await ui.find({ type: 'Text', text: /11%/ })).toBeDefined()
+  await ui.unmount()
 })
 
 test('an unknown mode is refused', async ($, on) => {
