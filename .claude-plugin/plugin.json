@@ -1,6 +1,10 @@
 {
   "name": "context-bar",
-  "version": "0.1.0",
-  "description": "A horizontal context-window bar above the prompt: fill by category, tokens, room until auto-compact, model",
+  "version": "1.0.0",
+  "description": "A band above the prompt: the context window by /context category, a prompt-cache countdown, model and effort, your plan usage and the session cost",
+  "author": {
+    "name": "TheHighestBit"
+  },
+  "license": "MIT",
   "types": "./types/index.d.ts"
 }

@@ -1,0 +1,6 @@
+{
+  "name": "context-bar",
+  "description": "context-bar: a band above the Claude Code prompt with the context window by category, a prompt-cache countdown, plan usage and the session cost",
+  "owner": { "name": "TheHighestBit" },
+  "plugins": [{ "name": "context-bar", "source": "./" }]
+}
