@@ -1005,12 +1005,23 @@ test('an empty limits list beside the old fixed fields draws no meters', async (
   await ui.unmount()
 })
 
-test('a limit the server marks inactive is not drawn', async ($, on) => {
-  const w = world(on, { replies: [{ status: 200, body: { limits: [{ ...SESSION_ROW, is_active: false }, WEEK_ROW] } }] })
+test("a limit that is not the server's headline pick is still drawn", async ($, on) => {
+  // As the server sends a model's own week while the all-models week is its pick.
+  const fable = {
+    kind: 'weekly_scoped',
+    group: 'weekly',
+    percent: 1,
+    resets_at: '2026-10-07T04:00:00Z',
+    severity: 'normal',
+    is_active: false,
+    scope: { model: { id: null, display_name: 'Fable' }, surface: null },
+  }
+  const w = world(on, { replies: [{ status: 200, body: { limits: [WEEK_ROW, fable] } }] })
   await start($, w)
   const ui = await $.ui.mount({ plugin: 'context-bar', surface: 'terminal', ...BAND })
-  expect(await ui.find({ type: 'Text', text: /^Session$/ })).toBeUndefined()
   expect(await ui.find({ type: 'Text', text: /^Week$/ })).toBeDefined()
+  expect(await ui.find({ type: 'Text', text: /^Fable$/ })).toBeDefined()
+  expect(await ui.find({ type: 'Text', text: / 1%/ })).toBeDefined()
   await ui.unmount()
 })
 

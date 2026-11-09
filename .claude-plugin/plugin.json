@@ -1,6 +1,6 @@
 {
   "name": "context-bar",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "description": "A band above the prompt: the context window by /context category, a prompt-cache countdown, model and effort, your plan usage and the session cost",
   "author": {
     "name": "TheHighestBit"

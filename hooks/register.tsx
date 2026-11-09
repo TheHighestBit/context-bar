@@ -782,22 +782,20 @@ function planWindows(body: unknown): PlanWindow[] {
   }
   const rows: PlanWindow[] = []
   if (Array.isArray(body.limits)) {
-    // An empty list is an account with no plan limits; a row the server marks
-    // inactive does not apply. Only a list none of whose rows reads falls back.
-    let read = 0
+    // Every row the server sends is a meter: `is_active` only names its pick
+    // for a single-value indicator, and a row without it is still drawn down.
+    // An empty list is an account with no plan limits; only a list none of
+    // whose rows reads falls back.
     for (const row of body.limits) {
       if (isRecord(row) && typeof row.percent === 'number' && Number.isFinite(row.percent)) {
-        read += 1
-        if (row.is_active !== false) {
-          rows.push({
-            label: limitLabel(row),
-            percent: row.percent,
-            resetsAt: typeof row.resets_at === 'string' ? row.resets_at : null,
-          })
-        }
+        rows.push({
+          label: limitLabel(row),
+          percent: row.percent,
+          resetsAt: typeof row.resets_at === 'string' ? row.resets_at : null,
+        })
       }
     }
-    if (read > 0 || body.limits.length === 0) {
+    if (rows.length > 0 || body.limits.length === 0) {
       return rows
     }
   }
